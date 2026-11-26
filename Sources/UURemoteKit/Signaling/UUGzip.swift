@@ -40,19 +40,21 @@ enum UUGzip {
         if flags & 0x02 != 0 { try skip(2) } // FHCRC
 
         var output = Data()
-        var exceeded = false
+        // Thrown from the output handler, it stops inflating at the cap
+        // instead of after the whole member.
         let filter = try OutputFilter(.decompress, using: .zlib) { chunk in
             guard let chunk else { return }
-            if output.count + chunk.count > limit { exceeded = true; return }
+            guard output.count + chunk.count <= limit else { throw Failure.tooLarge }
             output.append(chunk)
         }
         do {
             try filter.write(Data(bytes[offset ..< bytes.count - 8]))
             try filter.finalize()
+        } catch Failure.tooLarge {
+            throw Failure.tooLarge
         } catch {
-            throw exceeded ? Failure.tooLarge : Failure.corrupt
+            throw Failure.corrupt
         }
-        if exceeded { throw Failure.tooLarge }
         // The trailer's ISIZE: the content's length, modulo 2^32.
         let size = bytes[(bytes.count - 4)...].reversed().reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
         guard UInt32(truncatingIfNeeded: output.count) == size else { throw Failure.corrupt }

@@ -1,3 +1,4 @@
+import Compression
 import Foundation
 import XCTest
 @testable import UURemoteKit
@@ -15,6 +16,20 @@ final class SignalingTests: XCTestCase {
         var wrongSize = gzipSDP
         wrongSize[wrongSize.count - 4] ^= 1
         XCTAssertThrowsError(try UUGzip.decompress(wrongSize))
+    }
+
+    /// A member that inflates past the cap fails as too large.
+    func testAGzipBombStopsAtTheCap() throws {
+        var deflated = Data()
+        let filter = try OutputFilter(.compress, using: .zlib) { deflated.append($0 ?? Data()) }
+        try filter.write(Data(count: 32 * 1024 * 1024))
+        try filter.finalize()
+        // Header, raw DEFLATE, then a CRC (unchecked) and ISIZE 2^25 mod 2^32.
+        let bomb = Data(hex: "1f8b08000000000000ff") + deflated + Data(hex: "00000000" + "00000002")
+        XCTAssertEqual(try UUGzip.decompress(bomb, limit: 32 * 1024 * 1024).count, 32 * 1024 * 1024)
+        XCTAssertThrowsError(try UUGzip.decompress(bomb, limit: 1024 * 1024)) { error in
+            guard case UUGzip.Failure.tooLarge = error else { return XCTFail("\(error)") }
+        }
     }
 
     func testEngineIOPackets() throws {
