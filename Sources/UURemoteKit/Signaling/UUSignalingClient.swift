@@ -127,7 +127,7 @@ enum UUEngineIO {
             //    <n> Engine.IO attachment frames that follow separately.
             //  - `4[56]<id>[…]` — the ack reply to a binary event we sent
             //    (the signal server answers `451-<ackId>` emits with
-            //    `45<ackId>["success",{…}]`, per upstream wire.rs).
+            //    `45<ackId>["success",{…}]`).
             if let dash = rest.firstIndex(of: "-"),
                dash > rest.startIndex,
                rest[..<dash].allSatisfy(\.isNumber),
@@ -219,8 +219,8 @@ actor UUSignalingClient {
     /// resume every waiter with an error so callers never hang.
     private var pendingAcks: [UInt64: CheckedContinuation<Data, Error>] = [:]
     private var ackTimeouts: [UInt64: Task<Void, Never>] = [:]
-    /// Upstream starts its ack ids at 10 and steps by 2 (signal.rs
-    /// `next_ack`); the values are opaque to the server but we match anyway.
+    /// Ack ids start at 10 and step by 2, as the official viewer's do; the
+    /// server does not read them.
     private var nextAckID: UInt64 = 10
 
     /// A binary event whose JSON announced N attachments: its `{"_placeholder":true,"num":k}`
@@ -396,9 +396,8 @@ actor UUSignalingClient {
     }
 
     /// Engine.IO attachment frames arrive as bare binary WebSocket frames
-    /// after their `45<n>-…` JSON announced them. UU's SDK framing prefixes
-    /// each attachment with `0x04`; uurc-web's transport patch strips it
-    /// unconditionally, so we do the same.
+    /// after their `45<n>-…` JSON announced them. UU's servers prefix each
+    /// attachment with `0x04`, which is stripped.
     func handleBinaryFrame(_ data: Data) {
         var attachment = data
         if attachment.first == 0x04 { attachment = attachment.dropFirst(1) }
@@ -516,8 +515,7 @@ actor UUSignalingClient {
 
     /// The Socket.IO `control` emit that asks the host to be controlled.
     ///
-    /// Wire shape (upstream `Shape.control` + socket.io's own placeholder
-    /// scheme): one text packet
+    /// On the wire (Socket.IO's own placeholder scheme): one text packet
     /// `451-<ackId>["control",{"app_control_id":…,"app_data":{"_placeholder":true,"num":0},"streamer_data":"<json>"}]`
     /// followed by one `0x04`-prefixed binary frame carrying the encoded
     /// ConnectOptions (`app_data` resolves to attachment 0 on the server).
@@ -557,7 +555,7 @@ actor UUSignalingClient {
     }
 
     /// Sends a soac message (offer/answer/candidate/restart_ice): the arg is
-    /// the `{client_id, data:{…}}` envelope upstream wraps every SOAC in.
+    /// the `{client_id, data:{…}}` envelope every soac comes in.
     func sendSOAC(_ soac: [String: Any]) throws {
         try emit(event: "soac", args: [soac])
     }

@@ -381,7 +381,7 @@ public actor UUAPIClient {
     // MARK: - Remote assistance
 
     /// The response code the assistance API returns while the host still
-    /// has to confirm the request (`CONFIRMATION_REQUIRED_CODE` upstream).
+    /// has to confirm the request.
     public static let confirmationRequiredCode = 0x470 // 1136
 
     /// A room's connection details. The service answers flat (`token`,
@@ -407,8 +407,8 @@ public actor UUAPIClient {
         return result
     }
 
-    /// Deep search for a string field inside a nested response — upstream
-    /// reads `control_id` the same way (`readNestedString`).
+    /// A string field anywhere in a nested response (`control_id` moves
+    /// between versions of the service).
     private static func nestedString(_ value: Any?, key: String) -> String? {
         if let dict = value as? [String: Any] {
             if let direct = dict[key] as? String, !direct.isEmpty { return direct }
@@ -424,8 +424,7 @@ public actor UUAPIClient {
     }
 
     /// Joins a remote-assistance room by connect-id + verification code.
-    /// Tries the v2 endpoint first, falls back to v1 on 404/405 (upstream's
-    /// `join_share`), and when the answer is `0x470` the host still has to
+    /// Tries the v2 endpoint first, falls back to v1 on 404/405, and when the answer is `0x470` the host still has to
     /// confirm — poll `by_confirmation` until the room opens.
     public func joinShareByCode(connectID: String, code: String) async throws -> UURoomConfig {
         let body: [String: Any] = ["connect_id": connectID, "connect_code": code]
