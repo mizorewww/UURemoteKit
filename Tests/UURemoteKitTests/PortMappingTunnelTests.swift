@@ -118,6 +118,32 @@ final class PortMappingTunnelTests: XCTestCase {
         } catch {}
     }
 
+    /// A host that speaks first, like sshd with its banner: its DATA comes
+    /// right behind the SYN-ACK, before the opener has resumed.
+    func testDataRightBehindTheSYNACKIsKept() async throws {
+        let banner = Data("SSH-2.0-OpenSSH_9.9\r\n".utf8)
+        let tunnel = OSAllocatedUnfairLock<UUPortMappingTunnel?>(initialState: nil)
+        let opener = UUPortMappingTunnel { envelope in
+            guard let message = try? UUProtoMessage(serializedBytes: envelope),
+                  case let .portMappingFrame(frame) = message.body, frame.type == .syn,
+                  let tunnel = tunnel.withLock({ $0 }) else { return }
+            let key = UUPortMappingKey(frame)
+            DispatchQueue.global().async {
+                tunnel.handle(key.frame(.synAck, payload: Data(#"{"version":1,"ok":true}"#.utf8)))
+                tunnel.handle(key.frame(.data, payload: banner))
+            }
+        }
+        tunnel.withLock { $0 = opener }
+        for _ in 0 ..< 50 {
+            let fd = try await opener.openStream(host: "127.0.0.1", port: 22, timeout: .seconds(2))
+            // A lost banner fails the read instead of hanging the test.
+            var wait = timeval(tv_sec: 1, tv_usec: 0)
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
+            XCTAssertEqual(readAll(fd, count: banner.count), banner)
+            close(fd)
+        }
+    }
+
     /// Streams closed by the host while data for them is in flight: every
     /// descriptor is closed once, and no write lands on a closed one.
     func testClosingUnderTrafficNeverTouchesAClosedDescriptor() async throws {

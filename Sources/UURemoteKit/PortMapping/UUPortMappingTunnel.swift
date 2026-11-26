@@ -88,7 +88,13 @@ final class UUPortMappingTunnel: Sendable {
                 if !Self.write(payload, to: stream.fd) { self?.close(key, sendFIN: true) }
             }
         case .fin:
-            close(key, sendFIN: false)
+            // A FIN instead of a SYN-ACK fails the open; its opener tears
+            // the stream down.
+            if let waiter = state.withLock({ $0.pending.removeValue(forKey: key) }) {
+                waiter.resume(throwing: UUPortMappingFailure("The host closed the port mapping."))
+            } else {
+                close(key, sendFIN: false)
+            }
         case .syn, .dataAck, .UNRECOGNIZED:
             // A host's own forwards (SYN) are not ours to take.
             break
@@ -112,33 +118,18 @@ final class UUPortMappingTunnel: Sendable {
     /// A stream to `host:port` as the host sees it. Returns the caller's end
     /// of a socket pair, which the caller closes; `onClose` runs once the
     /// stream has ended.
+    ///
+    /// The stream is registered before the SYN goes out: a host that speaks
+    /// first (sshd's banner) sends DATA right behind its SYN-ACK, and those
+    /// bytes wait in the socket pair until the caller reads them.
     func openStream(host: String, port: UInt16, timeout: Duration, onClose: (@Sendable () -> Void)? = nil) async throws -> Int32 {
         let key = try state.withLock { state -> UUPortMappingKey in
             guard !state.closed else { throw UUPortMappingFailure("The UU Remote connection closed.") }
             defer { state.nextID += 1 }
             return UUPortMappingKey(session: state.nextID, rule: state.nextID, stream: state.nextID)
         }
-        let timer = Task { [weak self] in
-            try? await Task.sleep(for: timeout)
-            self?.state.withLock { $0.pending.removeValue(forKey: key) }?
-                .resume(throwing: UUPortMappingFailure("The host did not answer the port mapping in time."))
-        }
-        defer { timer.cancel() }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let open = state.withLock { state -> Bool in
-                guard !state.closed else { return false }
-                state.pending[key] = continuation
-                return true
-            }
-            guard open else {
-                return continuation.resume(throwing: UUPortMappingFailure("The UU Remote connection closed."))
-            }
-            send(key.frame(.syn, payload: UUPortMappingSYN(targetHost: host, targetPort: port).data))
-        }
-
         var pair: [Int32] = [-1, -1]
         guard socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0 else {
-            send(key.frame(.fin))
             throw UUPortMappingFailure("Could not make a socket pair (errno \(errno)).")
         }
         for fd in pair {
@@ -159,17 +150,36 @@ final class UUPortMappingTunnel: Sendable {
         stream.source.setCancelHandler {
             Darwin.close(stream.fd)
         }
-        let added = state.withLock { state -> Bool in
-            guard !state.closed else { return false }
-            state.streams[key] = stream
-            return true
-        }
-        guard added else {
-            Darwin.close(pair[0])
-            Darwin.close(pair[1])
-            throw UUPortMappingFailure("The UU Remote connection closed.")
-        }
+        // Nothing can be read yet: the caller's end is not handed out.
         stream.source.resume()
+
+        let timer = Task { [weak self] in
+            try? await Task.sleep(for: timeout)
+            self?.state.withLock { $0.pending.removeValue(forKey: key) }?
+                .resume(throwing: UUPortMappingFailure("The host did not answer the port mapping in time."))
+        }
+        defer { timer.cancel() }
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let open = state.withLock { state -> Bool in
+                    guard !state.closed else { return false }
+                    state.pending[key] = continuation
+                    state.streams[key] = stream
+                    return true
+                }
+                guard open else {
+                    return continuation.resume(throwing: UUPortMappingFailure("The UU Remote connection closed."))
+                }
+                send(key.frame(.syn, payload: UUPortMappingSYN(targetHost: host, targetPort: port).data))
+            }
+        } catch {
+            // Refused, timed out or cut off: the stream never opened, so
+            // there is no FIN to send and no `onClose` to run.
+            state.withLock { _ = $0.streams.removeValue(forKey: key) }
+            stream.source.cancel()
+            Darwin.close(pair[0])
+            throw error
+        }
         return pair[0]
     }
 
@@ -190,7 +200,9 @@ final class UUPortMappingTunnel: Sendable {
                 state.streams.removeAll()
                 state.pending.removeAll()
             }
-            return (Array(state.streams.values), Array(state.pending.values))
+            // Streams still opening are torn down by their opener.
+            let open = state.streams.values.filter { state.pending[$0.key] == nil }
+            return (open, Array(state.pending.values))
         }
         for waiter in pending { waiter.resume(throwing: UUPortMappingFailure("The UU Remote connection closed.")) }
         for stream in streams {
