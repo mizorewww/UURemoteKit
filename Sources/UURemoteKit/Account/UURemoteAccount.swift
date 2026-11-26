@@ -38,6 +38,9 @@ public final class UURemoteAccount: ObservableObject {
     /// Called with the devices after every refresh that got them.
     public var onDevicesRefreshed: (([UUDeviceInfo]) -> Void)?
 
+    /// The rooms joined on this account, shared by its connections.
+    let rooms = UURoomRegistry()
+
     private let storage: UUCredentialStorage
     private var qrPollingTask: Task<Void, Never>?
     /// Handing the saved account to the API client at launch: the account
