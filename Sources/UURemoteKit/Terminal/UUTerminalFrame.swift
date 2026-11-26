@@ -78,6 +78,18 @@ public struct UUTerminalFrame: Equatable, Sendable {
         self.init(kind: kind, sessionID: uint32(at: 8), payload: Data(bytes[Self.headerSize...]), flags: (bytes[6], bytes[7]))
     }
 
+    /// An open response that refused the terminal: the host's code and
+    /// message. Nil for a terminal that opened, and for other frames.
+    public var openFailure: (code: Int, message: String)? {
+        guard kind == .openResponse, let reply = UUTerminalJSON.openResponse(payload), reply.code != 0 else { return nil }
+        return (reply.code, reply.message ?? "")
+    }
+
+    /// An exit frame's exit code, when it says one.
+    public var exitCode: Int? {
+        kind == .exit ? UUTerminalJSON.exitCode(payload) : nil
+    }
+
     static func isFrame(_ data: Data) -> Bool {
         data.count >= 4 && data.prefix(4) == magic
     }

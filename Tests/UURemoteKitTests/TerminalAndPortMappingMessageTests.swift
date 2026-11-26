@@ -48,4 +48,13 @@ final class TerminalAndPortMappingMessageTests: XCTestCase {
         XCTAssertEqual(UUPortMappingSYNACK(Data(#"{"version":1,"ok":false,"error":"refused"}"#.utf8))?.error, "refused")
         XCTAssertNil(UUPortMappingSYNACK(Data("nope".utf8)))
     }
+
+    func testOpenFailuresAndExitCodesAreReadFromTheirFrames() {
+        let refused = UUTerminalFrame(kind: .openResponse, sessionID: 1, payload: Data(#"{"code":3,"message":"no shell"}"#.utf8))
+        XCTAssertEqual(refused.openFailure?.code, 3)
+        XCTAssertEqual(refused.openFailure?.message, "no shell")
+        XCTAssertNil(UUTerminalFrame(kind: .openResponse, sessionID: 1, payload: Data(#"{"code":0}"#.utf8)).openFailure)
+        XCTAssertEqual(UUTerminalFrame(kind: .exit, sessionID: 1, payload: Data(#"{"exit_code":2}"#.utf8)).exitCode, 2)
+        XCTAssertNil(UUTerminalFrame(kind: .stdout, sessionID: 1, payload: Data(#"{"exit_code":2}"#.utf8)).exitCode)
+    }
 }
