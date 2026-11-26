@@ -18,7 +18,8 @@ enum UUGzip {
     }
 
     /// The content of a gzip member, at most `limit` bytes of it.
-    static func decompress(_ data: Data, limit: Int = 4 * 1024 * 1024) throws -> Data {
+    /// `inflated` sees the size of every chunk inflated.
+    static func decompress(_ data: Data, limit: Int = 4 * 1024 * 1024, inflated: (Int) -> Void = { _ in }) throws -> Data {
         let bytes = [UInt8](data)
         guard bytes.count >= 18, bytes[0] == 0x1F, bytes[1] == 0x8B, bytes[2] == 8 else { throw Failure.notGzip }
         let flags = bytes[3]
@@ -39,17 +40,23 @@ enum UUGzip {
         if flags & 0x10 != 0 { try skipString() } // FCOMMENT
         if flags & 0x02 != 0 { try skip(2) } // FHCRC
 
+        // Pulled a chunk at a time, inflating stops within a chunk of the
+        // cap. An OutputFilter cannot: its deinit finalizes the stream again
+        // and inflates past an error its handler threw.
+        let end = bytes.count - 8
+        var next = offset
         var output = Data()
-        // Thrown from the output handler, it stops inflating at the cap
-        // instead of after the whole member.
-        let filter = try OutputFilter(.decompress, using: .zlib) { chunk in
-            guard let chunk else { return }
-            guard output.count + chunk.count <= limit else { throw Failure.tooLarge }
-            output.append(chunk)
-        }
         do {
-            try filter.write(Data(bytes[offset ..< bytes.count - 8]))
-            try filter.finalize()
+            let filter = try InputFilter<Data>(.decompress, using: .zlib) { length in
+                let upTo = min(next + length, end)
+                defer { next = upTo }
+                return Data(bytes[next ..< upTo])
+            }
+            while let chunk = try filter.readData(ofLength: 64 * 1024), !chunk.isEmpty {
+                inflated(chunk.count)
+                output.append(chunk)
+                guard output.count <= limit else { throw Failure.tooLarge }
+            }
         } catch Failure.tooLarge {
             throw Failure.tooLarge
         } catch {

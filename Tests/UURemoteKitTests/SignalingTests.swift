@@ -18,7 +18,9 @@ final class SignalingTests: XCTestCase {
         XCTAssertThrowsError(try UUGzip.decompress(wrongSize))
     }
 
-    /// A member that inflates past the cap fails as too large.
+    /// A member that inflates past the cap fails as too large, and the
+    /// inflater stops within one chunk of the cap instead of inflating the
+    /// whole member first.
     func testAGzipBombStopsAtTheCap() throws {
         var deflated = Data()
         let filter = try OutputFilter(.compress, using: .zlib) { deflated.append($0 ?? Data()) }
@@ -27,9 +29,17 @@ final class SignalingTests: XCTestCase {
         // Header, raw DEFLATE, then a CRC (unchecked) and ISIZE 2^25 mod 2^32.
         let bomb = Data(hex: "1f8b08000000000000ff") + deflated + Data(hex: "00000000" + "00000002")
         XCTAssertEqual(try UUGzip.decompress(bomb, limit: 32 * 1024 * 1024).count, 32 * 1024 * 1024)
-        XCTAssertThrowsError(try UUGzip.decompress(bomb, limit: 1024 * 1024)) { error in
+        let limit = 1024 * 1024
+        var inflated = 0
+        var largestChunk = 0
+        XCTAssertThrowsError(try UUGzip.decompress(bomb, limit: limit) { size in
+            inflated += size
+            largestChunk = max(largestChunk, size)
+        }) { error in
             guard case UUGzip.Failure.tooLarge = error else { return XCTFail("\(error)") }
         }
+        XCTAssertGreaterThan(inflated, limit)
+        XCTAssertLessThanOrEqual(inflated, limit + largestChunk)
     }
 
     func testEngineIOPackets() throws {
