@@ -1,0 +1,317 @@
+// The messages a UU Remote viewer and host exchange on the WebRTC data
+// channels (CONTROL, TEXT and FILE). Field numbers are what the host speaks;
+// the names are ours. Repeated scalars are unpacked, as the host sends them.
+//
+// Regenerate the Swift with Scripts/generate-protos.sh.
+
+syntax = "proto3";
+
+package uu;
+
+option swift_prefix = "UUProto";
+
+// Every message on CONTROL_DATA_CHANNEL, TEXT_DATA_CHANNEL and
+// FILE_DATA_CHANNEL that is not plain JSON input or a TERM frame.
+message Message {
+  uint64 sequence = 1;
+  // Milliseconds since 1970 (seconds on the clipboard and port-mapping paths).
+  uint64 timestamp = 2;
+  oneof body {
+    SimpleAction simple_action = 3;
+    ScreenSources screen_sources = 7;
+    CaptureChange capture_change = 8;
+    SystemStateChange system_state_change = 15;
+    ClipboardChange clipboard_change = 17;
+    RpcRequest rpc_request = 21;
+    RpcResponse rpc_response = 22;
+    PortMappingFrame port_mapping_frame = 27;
+  }
+}
+
+// SimpleAction.action values.
+enum SimpleActionType {
+  ECHO_REQUEST = 0;
+  ECHO_RESPONSE = 1;
+  SHOW_DESKTOP = 2;
+  SHOW_WINDOWS = 3;
+  CAPTURE_DESKTOP = 4;
+  CAPTURE_WINDOW = 5;
+  CAPTURE_MUMU = 6;
+  STOP_CAPTURE = 7;
+  RESTART_CAPTURE = 8;
+  REBOOT_SYSTEM = 9;
+  LOCK_SYSTEM = 10;
+  KEY_TOGGLE = 11;
+  SHUTDOWN_SYSTEM = 12;
+  SHOW_TASKMGR = 13;
+  MUTE_SYSTEM = 14;
+  AUTO_UNLOCK_SYSTEM = 15;
+  MUTE_RESTORE = 16;
+  MUTE_PERMANENT = 17;
+  MUTE_TEMPORARY = 18;
+  SET_AUTO_LOCK = 19;
+  STOP_ACQUIRE_UPDATE = 20;
+  QUIT_CAPTURE = 21;
+  ACQUIRE_SYSTEM_INFO = 22;
+  MICROPHONE_OPENED = 23;
+  MICROPHONE_CLOSED = 24;
+  SPEAKER_OPENED = 25;
+  SPEAKER_CLOSED = 26;
+  NEED_RESTART_USERAPP = 27;
+}
+
+message SimpleAction {
+  // Sent even when it is ECHO_REQUEST (0), as the host's own viewer does.
+  optional SimpleActionType action = 1;
+  // A JSON object, e.g. {"seq":12} or {"screen_id":1}.
+  string args_json = 2;
+  FeatureFlags feature_flags = 4;
+}
+
+// The protocol versions each side speaks, per feature.
+message FeatureFlags {
+  int32 capture_setting = 1;
+  int32 simple_action = 2;
+  int32 system_metrics = 3;
+  int32 private_screen = 4;
+  int32 update_acquire = 5;
+  int32 file_transfer_ftp = 6;
+  int32 file_transfer_ftp2 = 7;
+  int32 clipboard = 8;
+  int32 qos_stat = 9;
+  int32 mumu_control = 10;
+  int32 virtual_mouse_device = 11;
+}
+
+message ScreenSources {
+  repeated Screen screens = 1;
+  // Absent when it is 0, which only means 0 when a screen has that id.
+  optional int32 current_screen_id = 2;
+}
+
+message Screen {
+  int32 id = 1;
+  int32 fps = 2;
+  repeated WinRect resolutions = 3;
+  WinRect current_resolution = 4;
+  // 1: a UU virtual screen.
+  int32 screen_type = 5;
+  bool is_primary = 7;
+  string display_name = 10;
+  // -1: streamed on no track now. Absent: track 0 once another screen says.
+  optional int32 video_track_index = 12;
+}
+
+message WinRect {
+  int32 left = 1;
+  int32 top = 2;
+  int32 width = 3;
+  int32 height = 4;
+  int32 pixel_width = 5;
+  int32 pixel_height = 6;
+}
+
+message CaptureChange {
+  uint64 capture_type = 1;
+  uint64 capture_id = 2;
+  string description = 3;
+}
+
+message SystemStateChange {
+  optional bool is_locked = 1;
+  CursorShape cursor = 2;
+}
+
+// The host's pointer. x and y are its hotspot in the shape's pixels.
+message CursorShape {
+  int32 x = 1;
+  int32 y = 2;
+  int32 width = 3;
+  int32 height = 4;
+  // width * height premultiplied RGBA pixels.
+  bytes rgba = 5;
+  int32 cursor_type = 6;
+  double x_scale = 7;
+  double y_scale = 8;
+  bool visible = 9;
+}
+
+// The older plain clipboard stream, chunked: chunks share an id and the
+// last one has no `more`.
+message ClipboardChange {
+  uint64 id = 1;
+  string text = 2;
+  bool more = 3;
+}
+
+message RpcHeader {
+  uint64 request_id = 1;
+}
+
+message RpcRequest {
+  RpcHeader header = 1;
+  oneof body {
+    CaptureSettingRequest capture_setting = 2;
+    RichClipboardRequest rich_clipboard = 9;
+    ClipboardTextChangeRequest clipboard_text = 10;
+    CreateVirtualDisplay create_virtual_display = 12;
+    RemoveVirtualDisplay remove_virtual_display = 13;
+    SendVideoTrack send_video_track = 15;
+  }
+}
+
+message RpcResponse {
+  RpcHeader header = 1;
+  oneof body {
+    CaptureSettingResponse capture_setting = 2;
+    RichClipboardResponse rich_clipboard = 5;
+    ClipboardTextChangeResponse clipboard_text = 6;
+  }
+}
+
+// The picture the viewer asks for, whole, on every change.
+message CaptureSettingRequest {
+  // FpsTier: 1 30, 2 60, 3 90, 4 144.
+  int32 fps_tier = 1;
+  // 2 HD, 3 Ultra HD, 4 Original, 5 Auto.
+  int32 quality = 2;
+  int32 cursor_capture = 3;
+  // -2: the session's tracks, no single monitor.
+  int32 screen_id = 4;
+  // -1: unchanged.
+  int32 width = 5;
+  int32 height = 6;
+  // ChromaFormat: 1 4:2:0, 3 4:4:4.
+  int32 chroma = 7;
+  int32 custom_bitrate = 8;
+  int32 dpi = 9;
+  int32 resolution_type = 10;
+  int32 hdr = 11;
+  int32 auto_quality = 12;
+  // 1 H.264, 2 H.265.
+  int32 codec = 13;
+  int32 max_width = 14;
+  int32 max_height = 15;
+  // The frame rate the viewer shows, raw.
+  int32 fps_count = 18;
+}
+
+message CaptureSettingResponse {
+  repeated RpcError errors = 1;
+}
+
+// -3: the frame rate was lowered to the screen's. -6: how true colour went
+// (detail {"error_code": 1|2} means it fell back to 4:2:0).
+message RpcError {
+  int32 code = 1;
+  string message = 2;
+  string detail = 3;
+}
+
+message ScreenResolution {
+  int32 width = 1;
+  int32 height = 2;
+}
+
+message CreateVirtualDisplay {
+  repeated ScreenResolution local_resolution = 1;
+  int32 count = 2;
+}
+
+message RemoveVirtualDisplay {
+  repeated int32 screen_ids = 1 [packed = false];
+}
+
+// The tracks the viewer has, which the host may stream screens on.
+message SendVideoTrack {
+  repeated int32 video_track_indexes = 1 [packed = false];
+}
+
+// A text change: what the Windows host applies, and what mobile viewers send.
+message ClipboardTextChangeRequest {
+  // 1: plain text.
+  int32 format = 1;
+  string text = 2;
+  bool more = 3;
+}
+
+message ClipboardTextChangeResponse {
+  // 1: CB_SUCCEEDED.
+  int32 err = 1;
+}
+
+// The rich clipboard negotiation, the only form the Mac host speaks: the
+// offerer lists formats, the taker asks for one, the offerer confirms and
+// sends it in blocks.
+message RichClipboardRequest {
+  oneof kind {
+    ClipboardFormatList format_list = 1;
+    ClipboardDataRequest data_request = 2;
+    ClipboardDataBlock data_block = 3;
+  }
+}
+
+message RichClipboardResponse {
+  oneof kind {
+    ClipboardFormatListAck format_list = 1;
+    ClipboardDataConfirm data_confirm = 2;
+    ClipboardBlockConfirm block_confirm = 3;
+  }
+}
+
+message ClipboardFormatList {
+  repeated ClipboardFormat formats = 1;
+}
+
+message ClipboardFormat {
+  // 13: CF_UNICODETEXT. 0: the Mac host's pasteboard text, sent as 0.
+  optional uint64 id = 1;
+  string name = 2;
+  string alternate_name = 3;
+}
+
+message ClipboardFormatListAck {}
+
+message ClipboardDataRequest {
+  optional uint64 format_id = 1;
+  string key = 2;
+  string format_name = 3;
+}
+
+message ClipboardDataConfirm {
+  // 1: here it comes. 2: unavailable.
+  uint64 status = 1;
+  string key = 2;
+  uint64 block_count = 3;
+}
+
+message ClipboardDataBlock {
+  string key = 1;
+  // Sent even when it is 0.
+  optional int32 index = 2;
+  bytes data = 3;
+}
+
+message ClipboardBlockConfirm {
+  string key = 1;
+  optional uint64 index = 2;
+  uint64 status = 3;
+}
+
+enum PortMappingType {
+  SYN = 0;
+  FIN = 1;
+  DATA = 2;
+  SYN_ACK = 3;
+  DATA_ACK = 4;
+}
+
+// One frame of a TCP stream carried to a port on the host. SYN and SYN_ACK
+// payloads are JSON.
+message PortMappingFrame {
+  uint64 session_id = 1;
+  uint64 rule_id = 2;
+  uint64 stream_id = 3;
+  PortMappingType type = 4;
+  bytes payload = 5;
+}

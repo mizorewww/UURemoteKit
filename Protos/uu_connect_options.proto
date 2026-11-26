@@ -1,0 +1,66 @@
+// ConnectOptions: the binary attachment (`app_data`) of the Socket.IO
+// `control` event a viewer sends to ask a host for control.
+//
+// Regenerate the Swift with Scripts/generate-protos.sh.
+
+syntax = "proto3";
+
+package uu;
+
+import "uu_control.proto";
+
+option swift_prefix = "UUProto";
+
+message ConnectOptions {
+  // CaptureType: 1 desktop, 8 terminal.
+  int32 capture_type = 1;
+  // The official viewer sends UINT64_MAX for capture types 1 and 8.
+  uint64 type_value = 2;
+  CaptureParams capture_params = 3;
+  repeated DecoderCap decoder_caps = 4;
+  bool force_virtual_display = 5;
+  repeated VirtualDisplayMode virtual_display_modes = 6;
+  ScreenResolution virtual_display_init_resolution = 7;
+  // ClientType: 2 Android, 3 Windows, 4 Mac, 5 iOS.
+  int32 client_type = 8;
+  string device_id = 9;
+  // 1 normal, 2 assistance.
+  int32 control_connect_type = 10;
+  FeatureFlags feature_flags = 11;
+  string client_version = 12;
+}
+
+message CaptureParams {
+  // FpsTier, not a frame rate: 1 30, 2 60, 3 90, 4 144.
+  int32 fps_tier = 1;
+  int32 video_quality = 2;
+  bool cursor_capture = 3;
+  // 2: follow the viewer's resolution.
+  int32 choose_resolution_type = 4;
+  ScreenResolution local_resolution = 5;
+  ScreenResolution choose_resolution = 6;
+  int32 chroma_format = 7;
+  int32 max_custom_bitrate = 8;
+  bool enable_hdr = 9;
+  int32 auto_frame_quality = 10;
+  // The raw frame rate.
+  int32 fps_count = 11;
+}
+
+// One codec the viewer decodes, and the largest frame it takes.
+message DecoderCap {
+  // Raw frames per second.
+  int32 fps = 1;
+  // 1 H.264, 2 H.265.
+  int32 codec = 2;
+  int32 width = 3;
+  int32 height = 4;
+  // 1 4:2:0, 3 4:4:4; desktop captures only.
+  int32 chroma = 5;
+}
+
+message VirtualDisplayMode {
+  int32 width = 1;
+  int32 height = 2;
+  int32 fps = 3;
+}
