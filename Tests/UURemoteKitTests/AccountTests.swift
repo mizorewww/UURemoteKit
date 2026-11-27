@@ -95,6 +95,15 @@ final class AccountTests: XCTestCase {
         XCTAssertNil(account.borrowedHost(deviceID: "elsewhere", in: devices))
     }
 
+    @MainActor
+    func testHiddenDevicesAreNoDesktops() async {
+        let account = UURemoteAccount(storage: UUMemoryCredentialStorage(), clientName: "Rayon")
+        await account.adopt(UUCredentials(), devices: [device("pc", platform: 1, alias: "PC"), device("renamed", platform: 1, alias: "Office"), device("mac", platform: 4, alias: "Mac")])
+        XCTAssertEqual(account.desktopDevices.map(\.deviceID), ["mac", "renamed", "pc"])
+        account.hiddenDeviceIDs = ["renamed", "pc"]
+        XCTAssertEqual(account.desktopDevices.map(\.deviceID), ["mac"])
+    }
+
     func testOwnRegistrationsAreKnownByTheirExactName() {
         XCTAssertTrue(device("a", platform: 1, alias: "Rayon").isRegistration(of: "Rayon"))
         XCTAssertTrue(device("a", platform: 1, alias: "rayon · mini").isRegistration(of: "Rayon"))

@@ -315,11 +315,17 @@ public final class UURemoteAccount: ObservableObject {
         return device
     }
 
+    /// Devices `desktopDevices` leaves out, by id: the viewer's sign-ins on
+    /// other computers, which the service lists as Windows hosts, and the
+    /// ones the person removed from the viewer. The service keeps no such
+    /// mark itself, so the viewer supplies it.
+    @Published public var hiddenDeviceIDs: Set<String> = []
+
     /// The account's computers to connect to (not this viewer's own
-    /// registrations), by name.
+    /// registrations, nor a hidden one), by name.
     public var desktopDevices: [UUDeviceInfo] {
         devices
-            .filter { $0.isComputer && !$0.isRegistration(of: clientName) && $0.deviceID != credentials.deviceID }
+            .filter { $0.isComputer && !$0.isRegistration(of: clientName) && $0.deviceID != credentials.deviceID && !hiddenDeviceIDs.contains($0.deviceID) }
             .sorted { $0.alias.localizedStandardCompare($1.alias) == .orderedAscending }
     }
 
