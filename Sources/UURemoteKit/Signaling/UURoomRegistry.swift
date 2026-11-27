@@ -23,10 +23,12 @@ struct UURoomLease: Sendable {
     var signal: UUSignalingClient { room.signal }
 }
 
-/// `[String: Any]` from JSONSerialization, carried across isolation.
-struct UUJSON: @unchecked Sendable {
-    let object: [String: Any]
-    init(_ object: [String: Any]) { self.object = object }
+/// A JSON object carried across isolation as its encoding: a dictionary
+/// of `Any` cannot cross, and signaling messages are small and few.
+struct UUJSON: Sendable {
+    let data: Data
+    init(_ object: [String: Any]) { data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data() }
+    var object: [String: Any] { (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:] }
 }
 
 /// What a room's socket receives, for its connections.
