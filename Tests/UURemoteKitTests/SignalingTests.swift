@@ -1,5 +1,6 @@
 import Compression
 import Foundation
+import Synchronization
 import XCTest
 @testable import UURemoteKit
 
@@ -76,17 +77,16 @@ final class SignalingTests: XCTestCase {
     /// A soac reaches the room once, plain or with a binary attachment,
     /// whose placeholder becomes the attachment's base64.
     func testSOACIsDeliveredOnceWithItsAttachmentHydrated() async {
-        final class Box: @unchecked Sendable { var soacs: [[String: Any]] = [] }
         let client = UUSignalingClient()
-        let box = Box()
-        await client.setOnSOAC { box.soacs.append($0) }
+        let soacs = Mutex<[String?]>([])
+        await client.setOnSOAC { soac in soacs.withLock { $0.append(soac["gzip_sdp"] as? String) } }
         await client.handleSocketPacket(.event(namespace: "/", id: nil, event: "soac", args: [["sdp": "plain"]], binary: []))
-        XCTAssertEqual(box.soacs.count, 1)
+        XCTAssertEqual(soacs.withLock(\.count), 1)
         await client.handleSocketPacket(.binaryEvent(namespace: "/", id: nil, event: "soac", args: [["gzip_sdp": ["_placeholder": true, "num": 0]]], attachmentCount: 1))
-        XCTAssertEqual(box.soacs.count, 1)
+        XCTAssertEqual(soacs.withLock(\.count), 1)
         await client.handleBinaryFrame(Data([0x04]) + gzipSDP)
-        XCTAssertEqual(box.soacs.count, 2)
-        XCTAssertEqual(box.soacs.last?["gzip_sdp"] as? String, gzipSDP.base64EncodedString())
+        XCTAssertEqual(soacs.withLock(\.count), 2)
+        XCTAssertEqual(soacs.withLock(\.last), gzipSDP.base64EncodedString())
     }
 
     func testAConnectThatNeverOpensFailsInsteadOfHanging() async {

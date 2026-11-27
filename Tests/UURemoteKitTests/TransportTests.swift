@@ -1,6 +1,7 @@
 import CoreVideo
 import Foundation
 import os
+import Synchronization
 import VideoToolbox
 @preconcurrency import WebRTC
 import XCTest
@@ -9,21 +10,50 @@ import XCTest
 /// Plays a UU host against the transport over loopback: answers its offer,
 /// echoes what arrives on CONTROL, and streams H.264 on the first video
 /// transceiver.
-private final class LoopbackHost: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegate, @unchecked Sendable {
+private final class LoopbackHost: Sendable {
     let factory = RTCPeerConnectionFactory(encoderFactory: RTCDefaultVideoEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory())
-    var peer: RTCPeerConnection!
-    var onCandidate: (@Sendable (RTCIceCandidate) -> Void)?
-    private var channels: [RTCDataChannel] = []
-    private var source: RTCVideoSource!
-    private var capturer: RTCVideoCapturer!
-    private var timer: DispatchSourceTimer?
+    private let events = Events()
+    let peer: RTCPeerConnection
+    private let source: RTCVideoSource
+    private let capturer: RTCVideoCapturer
+    private let timer = Mutex<DispatchSourceTimer?>(nil)
 
-    override init() {
-        super.init()
+    var onCandidate: (@Sendable (RTCIceCandidate) -> Void)? {
+        get { events.onCandidate.withLock { $0 } }
+        set { events.onCandidate.withLock { $0 = newValue } }
+    }
+
+    /// The peer's and channels' delegate: keeps the host's channels and
+    /// echoes what arrives on them.
+    private final class Events: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegate, Sendable {
+        let onCandidate = Mutex<(@Sendable (RTCIceCandidate) -> Void)?>(nil)
+        private let channels = Mutex<[RTCDataChannel]>([])
+
+        func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
+            dataChannel.delegate = self
+            channels.withLock { $0.append(dataChannel) }
+        }
+
+        func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
+            dataChannel.sendData(RTCDataBuffer(data: Data("echo:".utf8) + buffer.data, isBinary: true))
+        }
+
+        func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) { onCandidate.withLock { $0 }?(candidate) }
+        func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {}
+        func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
+        func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
+        func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
+        func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
+        func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {}
+        func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
+        func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
+    }
+
+    init() {
         factory.setOptions(UUWebRTCTransport.loopbackOnly)
         let configuration = RTCConfiguration()
         configuration.sdpSemantics = .unifiedPlan
-        peer = factory.peerConnection(with: configuration, constraints: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil), delegate: self)
+        peer = factory.peerConnection(with: configuration, constraints: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil), delegate: events)!
         source = factory.videoSource(forScreenCast: true)
         capturer = RTCVideoCapturer(delegate: source)
     }
@@ -83,32 +113,13 @@ private final class LoopbackHost: NSObject, RTCPeerConnectionDelegate, RTCDataCh
             self.source.capturer(self.capturer, didCapture: RTCVideoFrame(buffer: RTCCVPixelBuffer(pixelBuffer: buffer), rotation: ._0, timeStampNs: Int64(DispatchTime.now().uptimeNanoseconds)))
         }
         timer.resume()
-        self.timer = timer
+        self.timer.withLock { $0 = timer }
     }
 
     func close() {
-        timer?.cancel()
+        timer.withLock { $0 }?.cancel()
         peer.close()
     }
-
-    func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
-        dataChannel.delegate = self
-        channels.append(dataChannel)
-    }
-
-    func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
-        dataChannel.sendData(RTCDataBuffer(data: Data("echo:".utf8) + buffer.data, isBinary: true))
-    }
-
-    func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) { onCandidate?(candidate) }
-    func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
-    func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
 }
 
 final class TransportTests: XCTestCase {
