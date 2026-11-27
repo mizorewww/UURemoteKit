@@ -1,4 +1,7 @@
 import Combine
+import CoreVideo
+import IOSurface
+import Synchronization
 import Foundation
 import XCTest
 @testable import UURemoteKit
@@ -76,5 +79,25 @@ final class ConnectionTests: XCTestCase {
         XCTAssertFalse(connections.holds(UURemoteTarget(deviceID: "device")))
         // The terminal connection's hints, then nothing once it is gone.
         XCTAssertEqual(hints, ["", "Resolving device…", "UU Remote Account", ""])
+    }
+}
+
+final class FrameSinkTests: XCTestCase {
+    /// Reading the sink once per frame must not wrap it in another layer:
+    /// a stream of frames would then call through one layer per frame so
+    /// far, until the decoder's thread runs out of stack.
+    @MainActor
+    func testReadingTheFrameSinkLeavesItsCallDepthAlone() throws {
+        let account = UURemoteAccount(storage: UUMemoryCredentialStorage(), clientName: "Rayon")
+        let connections = UURemoteConnections(account: account, transportFactory: { _, _ in throw UURemoteFailure("unused") })
+        let connection = connections.desktop(for: UURemoteTarget(deviceID: "device"))
+        let depths = Mutex<[Int]>([])
+        connection.onFrame = { _ in depths.withLock { $0.append(Thread.callStackReturnAddresses.count) } }
+        let surface = try XCTUnwrap(IOSurface(properties: [.width: 1, .height: 1, .bytesPerElement: 4, .pixelFormat: kCVPixelFormatType_32BGRA]))
+        let frame = UUVideoFrame(mid: "0", surface: surface)
+        for _ in 0 ..< 1000 { connection.onFrame?(frame) }
+        let seen = depths.withLock { $0 }
+        XCTAssertEqual(seen.count, 1000)
+        XCTAssertEqual(seen.first, seen.last)
     }
 }

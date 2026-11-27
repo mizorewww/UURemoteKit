@@ -60,8 +60,8 @@ public final class UURemoteConnection: ObservableObject {
     /// Decoded frames of the screen in view, as they come, off the main
     /// actor. Set before `start()`.
     public nonisolated var onFrame: (@Sendable (UUVideoFrame) -> Void)? {
-        get { frameSink.withLock { $0 } }
-        set { frameSink.withLock { $0 = newValue } }
+        get { frameSink.withLock { $0?.deliver } }
+        set { frameSink.withLock { $0 = newValue.map(FrameSink.init) } }
     }
 
     public private(set) var phase: UURemotePhase = .connecting("")
@@ -82,7 +82,14 @@ public final class UURemoteConnection: ObservableObject {
     private var transport: UUPeerTransport?
     private var open: Set<UUDataChannel> = []
     private let sequence = OSAllocatedUnfairLock(initialState: UInt64(0))
-    private let frameSink = OSAllocatedUnfairLock<(@Sendable (UUVideoFrame) -> Void)?>(initialState: nil)
+    /// The closure sits in a struct: a bare closure as the lock's generic
+    /// state is reabstracted on its way in and out of each `withLock`, and
+    /// the inout write-back stores it wrapped once more, so every frame
+    /// would add a layer until the decoder's thread ran out of stack.
+    private let frameSink = OSAllocatedUnfairLock<FrameSink?>(initialState: nil)
+    private struct FrameSink: Sendable {
+        let deliver: @Sendable (UUVideoFrame) -> Void
+    }
     private lazy var tunnel = UUPortMappingTunnel { [weak self] envelope in
         self?.sendFromAnyThread(envelope, on: .file)
     }
@@ -275,7 +282,7 @@ public final class UURemoteConnection: ObservableObject {
                 }
                 guard drawn else { return }
                 if resized { Task { @MainActor in self?.frameSizeChanged(size) } }
-                sink.withLock { $0 }?(frame)
+                sink.withLock { $0 }?.deliver(frame)
             }
             self.transport = transport
             report(.connecting("Negotiating media"), hint: "Sending SDP offer…")
