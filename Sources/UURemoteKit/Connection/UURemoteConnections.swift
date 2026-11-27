@@ -10,6 +10,7 @@
 //  and closes a few seconds after the last terminal or stream on it.
 //
 
+import Combine
 import Foundation
 import os
 
@@ -28,7 +29,7 @@ public final class UURemoteConnections {
     }
 
     /// The connection terminals and streams use, by device.
-    private var entries: [String: Entry] = [:]
+    @Published private var entries: [String: Entry] = [:]
     /// Each device's open desktop.
     private var desktops: [String: UURemoteConnection] = [:]
     private static let log = Logger(subsystem: "UURemoteKit", category: "connections")
@@ -145,9 +146,17 @@ public final class UURemoteConnections {
         }
     }
 
-    /// What the device's connection is doing, for a terminal waiting on it.
-    public func status(of target: UURemoteTarget) -> String {
-        entries[target.deviceID]?.connection.statusHint ?? ""
+    /// What the device's connection is doing, for a terminal waiting on
+    /// it: now, and each time it changes or another connection takes over.
+    public func statusHints(of target: UURemoteTarget) -> AnyPublisher<String, Never> {
+        let key = target.deviceID
+        return $entries
+            .map { $0[key]?.connection }
+            .removeDuplicates { $0 === $1 }
+            .map { $0?.$statusHint.eraseToAnyPublisher() ?? Just("").eraseToAnyPublisher() }
+            .switchToLatest()
+            .removeDuplicates()
+            .eraseToAnyPublisher()
     }
 
     /// Whether a connection holds the device (open or lingering).

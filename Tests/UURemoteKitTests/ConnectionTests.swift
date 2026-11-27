@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import XCTest
 @testable import UURemoteKit
@@ -48,6 +49,12 @@ final class ConnectionTests: XCTestCase {
             throw UURemoteFailure("unreachable")
         }, linger: .milliseconds(10))
         let desktop = connections.desktop(for: UURemoteTarget(deviceID: "device"))
+        var closings: [Bool] = []
+        let closing = desktop.$isClosed.sink { closings.append($0) }
+        defer { closing.cancel() }
+        var hints: [String] = []
+        let hinting = connections.statusHints(of: UURemoteTarget(deviceID: "device")).sink { hints.append($0) }
+        defer { hinting.cancel() }
         var phases: [UURemotePhase] = []
         desktop.onEvent = { if case let .phase(phase) = $0 { phases.append(phase) } }
         desktop.start()
@@ -58,6 +65,7 @@ final class ConnectionTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("Sign in"))
         }
         XCTAssertTrue(desktop.isClosed)
+        XCTAssertEqual(closings, [false, true])
         XCTAssertTrue(phases.contains(.failed("Sign in to UU Remote to connect.")))
         // Terminals fail the same way, on a connection of their own.
         do {
@@ -66,5 +74,7 @@ final class ConnectionTests: XCTestCase {
         } catch {}
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertFalse(connections.holds(UURemoteTarget(deviceID: "device")))
+        // The terminal connection's hints, then nothing once it is gone.
+        XCTAssertEqual(hints, ["", "Resolving device…", "UU Remote Account", ""])
     }
 }

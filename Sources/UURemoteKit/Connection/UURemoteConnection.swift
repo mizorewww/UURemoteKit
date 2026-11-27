@@ -12,6 +12,7 @@
 //  open desktop's connection; `UURemoteConnections` hands them out.
 //
 
+import Combine
 import CoreGraphics
 import Foundation
 import os
@@ -51,7 +52,7 @@ public struct UURemoteFailure: Error, LocalizedError, Sendable {
 }
 
 @MainActor
-public final class UURemoteConnection {
+public final class UURemoteConnection: ObservableObject {
     public let target: UURemoteTarget
     public let purpose: UUConnectionPurpose
     /// Events, on the main actor.
@@ -64,13 +65,14 @@ public final class UURemoteConnection {
     }
 
     public private(set) var phase: UURemotePhase = .connecting("")
-    public private(set) var statusHint = ""
+    @Published public private(set) var statusHint = ""
     /// The host runs Windows (unknown hosts are taken for Windows, the
     /// common case): its keys are Windows virtual-key codes, not Mac ones.
     public private(set) var hostIsWindows = true
     /// Control and binary channels are open: terminals can start.
     public var isReady: Bool { open.contains(.control) && open.contains(.binary) && !isClosed }
-    public private(set) var isClosed = false
+    /// Published, so what runs on the connection hears it close.
+    @Published public private(set) var isClosed = false
 
     private let account: UURemoteAccount
     private let transportFactory: UUPeerTransportFactory
