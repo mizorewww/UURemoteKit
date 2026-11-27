@@ -47,7 +47,7 @@ enum UUAnnexB {
 
 /// Decodes one H.265 track into BGRA pixel buffers. WebRTC calls it from
 /// one decoding thread at a time.
-final class UUHEVCDecoder: NSObject, RTCVideoDecoder, @unchecked Sendable {
+final class UUHEVCDecoder: NSObject, RTCVideoDecoder {
     private var callback: RTCVideoDecoderCallback?
     private var session: VTDecompressionSession?
     private var format: CMVideoFormatDescription?
@@ -110,6 +110,7 @@ final class UUHEVCDecoder: NSObject, RTCVideoDecoder, @unchecked Sendable {
         return Self.ok
     }
 
+    // Unchecked: VideoToolbox types its handler @Sendable, yet without asynchronous decompression it runs on this thread before DecodeFrame returns.
     private final class Output: @unchecked Sendable {
         let callback: RTCVideoDecoderCallback?
         let timestamp: UInt32
@@ -223,7 +224,7 @@ final class UUKeyFrameRequests: Sendable {
 }
 
 /// A decoder that answers a pending key-frame request after decoding.
-final class UUKeyFrameRequestingDecoder: NSObject, RTCVideoDecoder, @unchecked Sendable {
+final class UUKeyFrameRequestingDecoder: NSObject, RTCVideoDecoder {
     private let inner: RTCVideoDecoder
     private let requests: UUKeyFrameRequests
     private var seen: Int
@@ -255,7 +256,7 @@ final class UUKeyFrameRequestingDecoder: NSObject, RTCVideoDecoder, @unchecked S
 
 /// H.265 (ours) and H.264 (WebRTC's own VideoToolbox decoder): what UU
 /// hosts send, both decoded into pixel buffers.
-final class UUDecoderFactory: NSObject, RTCVideoDecoderFactory, @unchecked Sendable {
+final class UUDecoderFactory: NSObject, RTCVideoDecoderFactory, Sendable {
     private let fallback = RTCDefaultVideoDecoderFactory()
     let requests = UUKeyFrameRequests()
 
