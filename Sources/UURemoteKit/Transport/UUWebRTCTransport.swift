@@ -232,8 +232,12 @@ public final class UUWebRTCTransport: NSObject, UUPeerTransport, @unchecked Send
         func setSize(_ size: CGSize) {}
 
         func renderFrame(_ frame: RTCVideoFrame?) {
-            guard let buffer = frame?.buffer as? RTCCVPixelBuffer, !transceiver.mid.isEmpty else { return }
-            onEvent(.frame(UUVideoFrame(mid: transceiver.mid, pixelBuffer: buffer.pixelBuffer)))
+            // VideoToolbox decodes onto IOSurfaces; a buffer that is not
+            // on one (no decoder here makes such) cannot be shown as it is.
+            guard let buffer = frame?.buffer as? RTCCVPixelBuffer,
+                  let surface = CVPixelBufferGetIOSurface(buffer.pixelBuffer)?.takeUnretainedValue(),
+                  !transceiver.mid.isEmpty else { return }
+            onEvent(.frame(UUVideoFrame(mid: transceiver.mid, surface: surface)))
         }
     }
 

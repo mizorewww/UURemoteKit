@@ -8,8 +8,8 @@
 //  `UUWebRTCTransport` is the one the kit ships; tests can hand in another.
 //
 
-import CoreVideo
 import Foundation
+import IOSurface
 
 /// The data channels the viewer opens, by their labels.
 public enum UUDataChannel: String, CaseIterable, Sendable {
@@ -63,18 +63,24 @@ public struct UUPeerConfiguration: Sendable {
     }
 }
 
-/// A decoded frame of one of the host's video tracks.
-public struct UUVideoFrame: @unchecked Sendable {
+/// A decoded frame of one of the host's video tracks: its IOSurface, held
+/// in use for as long as the frame lives, so the decoder's pool does not
+/// draw the next picture into it while it is still on its way to the
+/// screen. A pixel buffer cannot cross threads in Swift; a surface can.
+public final class UUVideoFrame: Sendable {
     /// The transceiver the track arrived on.
     public let mid: String
-    public let pixelBuffer: CVPixelBuffer
-    public var width: Int { CVPixelBufferGetWidth(pixelBuffer) }
-    public var height: Int { CVPixelBufferGetHeight(pixelBuffer) }
+    public let surface: IOSurface
+    public var width: Int { surface.width }
+    public var height: Int { surface.height }
 
-    public init(mid: String, pixelBuffer: CVPixelBuffer) {
+    public init(mid: String, surface: IOSurface) {
         self.mid = mid
-        self.pixelBuffer = pixelBuffer
+        self.surface = surface
+        surface.incrementUseCount()
     }
+
+    deinit { surface.decrementUseCount() }
 }
 
 public enum UUIceState: Sendable, Equatable {
